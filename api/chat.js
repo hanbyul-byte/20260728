@@ -1,6 +1,13 @@
-import OpenAI from "openai";
+export const config = {
+  api: {
+    bodyParser: true
+  }
+};
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
+const hasOpenAIKey = Boolean(process.env.OPENAI_API_KEY);
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -26,6 +33,72 @@ function normalizeMessages(messages) {
       role: m.role === "assistant" ? "assistant" : "user",
       content: m.content
     }));
+}
+
+function getZodiacFromBirthDate(birthDate) {
+  if (!birthDate) return null;
+
+  const parts = birthDate.split("-").map(Number);
+  if (parts.length !== 3 || parts.some((value) => !Number.isFinite(value))) return null;
+
+  const month = parts[1];
+  const day = parts[2];
+  const ranges = [
+    { name: "염소자리", start: [12, 22], end: [1, 19] },
+    { name: "물병자리", start: [1, 20], end: [2, 18] },
+    { name: "물고기자리", start: [2, 19], end: [3, 20] },
+    { name: "양자리", start: [3, 21], end: [4, 19] },
+    { name: "황소자리", start: [4, 20], end: [5, 20] },
+    { name: "쌍둥이자리", start: [5, 21], end: [6, 21] },
+    { name: "게자리", start: [6, 22], end: [7, 22] },
+    { name: "사자자리", start: [7, 23], end: [8, 22] },
+    { name: "처녀자리", start: [8, 23], end: [9, 22] },
+    { name: "천칭자리", start: [9, 23], end: [10, 22] },
+    { name: "전갈자리", start: [10, 23], end: [11, 22] },
+    { name: "사수자리", start: [11, 23], end: [12, 21] }
+  ];
+
+  for (const zodiac of ranges) {
+    const [sMonth, sDay] = zodiac.start;
+    const [eMonth, eDay] = zodiac.end;
+    if ((month === sMonth && day >= sDay) || (month === eMonth && day <= eDay)) {
+      return zodiac.name;
+    }
+  }
+
+  return "염소자리";
+}
+
+function buildSeedFromBirthDate(birthDate) {
+  if (!birthDate) return 73;
+  return birthDate
+    .split("-")
+    .map(Number)
+    .filter((value) => Number.isFinite(value))
+    .reduce((acc, value) => acc * 31 + value, 17);
+}
+
+function buildDemoNumbers(birthDate) {
+  const seed = buildSeedFromBirthDate(birthDate);
+  const numbers = [];
+  let current = seed;
+
+  while (numbers.length < 6) {
+    current = (current * 1103515245 + 12345) % 2147483648;
+    const candidate = (current % 45) + 1;
+    if (!numbers.includes(candidate)) {
+      numbers.push(candidate);
+    }
+  }
+
+  numbers.sort((a, b) => a - b);
+
+  let bonus = ((current * 1664525 + 1013904223) % 45) + 1;
+  while (numbers.includes(bonus)) {
+    bonus = (bonus % 45) + 1;
+  }
+
+  return { numbers, bonus };
 }
 
 function extractRecommendation(replyText) {
@@ -56,6 +129,36 @@ function extractUserMeta(messages) {
   };
 }
 
+function buildDemoReply(messages) {
+  const meta = extractUserMeta(messages);
+  const zodiac = meta.zodiac || getZodiacFromBirthDate(meta.birthDate) || "별자리";
+  const { numbers, bonus } = buildDemoNumbers(meta.birthDate);
+
+  return [
+    "데모 모드로 동작합니다.",
+    "",
+    `번호: ${numbers.join(", ")}`,
+    `보너스: ${bonus}`,
+    `이유: ${zodiac}의 흐름을 살짝 참고해서 홀짝과 구간이 너무 한쪽으로 쏠리지 않게 골랐어요. 재미로만 봐주세요.`
+  ].join("\n");
+}
+
+async function readRequestBody(req) {
+  if (typeof req.body === "string") {
+    return JSON.parse(req.body || "{}");
+  }
+
+  if (req.body && typeof req.body === "object") {
+    return req.body;
+  }
+
+  if (typeof req.json === "function") {
+    return await req.json();
+  }
+
+  return {};
+}
+
 async function saveRecommendation(payload) {
   if (!supabaseUrl || !supabaseServiceRoleKey) return false;
 
@@ -73,47 +176,61 @@ async function saveRecommendation(payload) {
   return response.ok;
 }
 
+async function generateReply(messages) {
+  if (!hasOpenAIKey) {
+    return { reply: buildDemoReply(messages), mode: "demo" };
+  }
+
+  const { default: OpenAI } = await import("openai");
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+  const response = await client.responses.create({
+    model: "gpt-5.4-mini",
+    instructions: buildSystemPrompt(),
+    input: messages,
+    reasoning: { effort: "low" },
+    max_output_tokens: 500
+  });
+
+  return {
+    reply: response.output_text || buildDemoReply(messages),
+    mode: "live"
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
     return;
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    res.status(500).json({ error: "OPENAI_API_KEY is not configured." });
-    return;
-  }
-
   try {
-    const parsed = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const parsed = await readRequestBody(req);
     const messages = normalizeMessages(Array.isArray(parsed.messages) ? parsed.messages : []);
-
-    const response = await client.responses.create({
-      model: "gpt-5.4-mini",
-      instructions: buildSystemPrompt(),
-      input: messages,
-      reasoning: { effort: "low" },
-      max_output_tokens: 500
-    });
-
-    const reply = response.output_text || "응답을 생성하지 못했습니다.";
-    const recommendation = extractRecommendation(reply);
+    const generated = await generateReply(messages);
+    const recommendation = extractRecommendation(generated.reply);
     const meta = extractUserMeta(messages);
 
-    const saved = await saveRecommendation({
-      user_input: meta.userInput,
-      assistant_reply: reply,
-      numbers: recommendation.numbers,
-      bonus_number: recommendation.bonus,
-      birth_date: meta.birthDate,
-      zodiac: meta.zodiac
-    }).catch(() => false);
+    const saved =
+      generated.mode === "live" &&
+      (await saveRecommendation({
+        user_input: meta.userInput,
+        assistant_reply: generated.reply,
+        numbers: recommendation.numbers,
+        bonus_number: recommendation.bonus,
+        birth_date: meta.birthDate,
+        zodiac: meta.zodiac
+      }).catch(() => false));
 
     res.status(200).json({
-      reply,
+      reply: generated.reply,
+      mode: generated.mode,
       saved
     });
   } catch (error) {
-    res.status(500).json({ error: error.message || "Server error" });
+    res.status(500).json({
+      error: error.message || "Server error",
+      message: "서버 연결에 실패했어요. 잠시 후 다시 시도해 주세요."
+    });
   }
 }
