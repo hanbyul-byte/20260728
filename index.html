@@ -450,7 +450,8 @@
         </div>
         <div id="explanation" style="margin-top:12px; white-space:pre-wrap; line-height:1.6;"></div>
         <div class="cardInputRow">
-          <input id="higgsfieldKeyInput" type="password" placeholder="Higgsfield API 키를 입력하세요" />
+          <input id="higgsfieldKeyInput" type="password" placeholder="Higgsfield API Key" />
+          <input id="higgsfieldSecretInput" type="password" placeholder="Higgsfield API Key Secret" />
           <button class="secondary" id="saveKeyBtn" type="button">키 저장</button>
         </div>
         <div class="controls" style="margin-top:12px;">
@@ -495,6 +496,7 @@
     const bonusBall = document.getElementById("bonusBall");
     const explanationEl = document.getElementById("explanation");
     const higgsfieldKeyInput = document.getElementById("higgsfieldKeyInput");
+    const higgsfieldSecretInput = document.getElementById("higgsfieldSecretInput");
     const saveKeyBtn = document.getElementById("saveKeyBtn");
     const generateCardBtn = document.getElementById("generateCardBtn");
     const clearCardBtn = document.getElementById("clearCardBtn");
@@ -582,6 +584,14 @@
 
     function setSavedHiggsfieldKey(value) {
       localStorage.setItem("higgsfield_api_key", value);
+    }
+
+    function getSavedHiggsfieldSecret() {
+      return localStorage.getItem("higgsfield_api_secret") || "";
+    }
+
+    function setSavedHiggsfieldSecret(value) {
+      localStorage.setItem("higgsfield_api_secret", value);
     }
 
     function renderCardPreview(dataUrl) {
@@ -711,6 +721,7 @@
 
     saveKeyBtn.addEventListener("click", () => {
       setSavedHiggsfieldKey(higgsfieldKeyInput.value.trim());
+      setSavedHiggsfieldSecret(higgsfieldSecretInput.value.trim());
       cardHint.textContent = "API 키를 브라우저에 저장했습니다. 이제 카드 생성을 시도할 수 있어요.";
     });
 
@@ -720,9 +731,10 @@
     });
 
     generateCardBtn.addEventListener("click", async () => {
-      const key = higgsfieldKeyInput.value.trim() || getSavedHiggsfieldKey();
-      if (!key) {
-        cardHint.textContent = "먼저 Higgsfield API 키를 입력해 주세요.";
+      const apiKey = higgsfieldKeyInput.value.trim() || getSavedHiggsfieldKey();
+      const apiKeySecret = higgsfieldSecretInput.value.trim() || getSavedHiggsfieldSecret();
+      if (!apiKey || !apiKeySecret) {
+        cardHint.textContent = "먼저 Higgsfield API Key와 Secret을 모두 입력해 주세요.";
         return;
       }
 
@@ -742,7 +754,8 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            apiKey: key,
+            apiKey,
+            apiKeySecret,
             birthDate: birth,
             zodiac,
             numbersText: parsed.numbers.length ? `${parsed.numbers.join(", ")} / 보너스 ${parsed.bonus || ""}` : "",
@@ -789,6 +802,7 @@
 
     renderChat();
     higgsfieldKeyInput.value = getSavedHiggsfieldKey();
+    higgsfieldSecretInput.value = getSavedHiggsfieldSecret();
     checkHealth();
   </script>
 </body>

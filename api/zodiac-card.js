@@ -76,9 +76,19 @@ export default async function handler(req, res) {
 
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
-    const zodiac = body.zodiac || "별자리";
-    const birthDate = body.birthDate || "";
-    const numbersText = body.numbersText || "";
+    const apiKey = String(body.apiKey || "").trim();
+    const apiKeySecret = String(body.apiKeySecret || "").trim();
+    const zodiac = String(body.zodiac || "별자리").trim();
+    const birthDate = String(body.birthDate || "").trim();
+    const numbersText = String(body.numbersText || "").trim();
+
+    console.log("[zodiac-card] request received", {
+      hasApiKey: Boolean(apiKey),
+      hasApiKeySecret: Boolean(apiKeySecret),
+      zodiac,
+      birthDate
+    });
+
     const svg = buildCardSvg({ zodiac, birthDate, numbersText });
     const imageDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 
@@ -87,6 +97,7 @@ export default async function handler(req, res) {
       imageDataUrl
     });
   } catch (error) {
+    console.error("[zodiac-card] failed:", error);
     res.status(500).json({
       error: error.message || "Server error",
       message: "별자리 카드를 만들지 못했습니다."
