@@ -1,3 +1,5 @@
+import { createClient } from "@supabase/supabase-js";
+
 export const config = {
   api: {
     bodyParser: true
@@ -10,6 +12,10 @@ export const maxDuration = 30;
 const hasOpenAIKey = Boolean(process.env.OPENAI_API_KEY);
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseClient =
+  supabaseUrl && supabaseServiceRoleKey
+    ? createClient(supabaseUrl, supabaseServiceRoleKey)
+    : null;
 
 function buildSystemPrompt() {
   return [
@@ -160,20 +166,19 @@ async function readRequestBody(req) {
 }
 
 async function saveRecommendation(payload) {
-  if (!supabaseUrl || !supabaseServiceRoleKey) return false;
+  if (!supabaseClient) {
+    console.log("[supabase] skipped: client not configured");
+    return false;
+  }
 
-  const response = await fetch(`${supabaseUrl.replace(/\/$/, "")}/rest/v1/lottery_recommendations`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: supabaseServiceRoleKey,
-      Authorization: `Bearer ${supabaseServiceRoleKey}`,
-      Prefer: "return=minimal"
-    },
-    body: JSON.stringify(payload)
-  });
+  const { error } = await supabaseClient.from("lotto_records").insert([payload]);
+  if (error) {
+    console.error("[supabase] insert failed:", error.message);
+    return false;
+  }
 
-  return response.ok;
+  console.log("[supabase] insert succeeded");
+  return true;
 }
 
 async function generateReply(messages) {
@@ -210,17 +215,18 @@ export default async function handler(req, res) {
     const generated = await generateReply(messages);
     const recommendation = extractRecommendation(generated.reply);
     const meta = extractUserMeta(messages);
+    const reason = generated.reply || "";
 
-    const saved =
-      generated.mode === "live" &&
-      (await saveRecommendation({
-        user_input: meta.userInput,
-        assistant_reply: generated.reply,
-        numbers: recommendation.numbers,
-        bonus_number: recommendation.bonus,
-        birth_date: meta.birthDate,
-        zodiac: meta.zodiac
-      }).catch(() => false));
+    const saved = await saveRecommendation({
+      birth_date: meta.birthDate || null,
+      zodiac: meta.zodiac || null,
+      numbers: recommendation.numbers.length ? recommendation.numbers.join(", ") : "",
+      bonus: recommendation.bonus,
+      reason
+    }).catch((error) => {
+      console.error("[supabase] insert exception:", error.message);
+      return false;
+    });
 
     res.status(200).json({
       reply: generated.reply,
