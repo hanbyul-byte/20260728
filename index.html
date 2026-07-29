@@ -518,6 +518,16 @@
       explanationEl.textContent = payload.explanation;
     }
 
+    function trackLotteryButtonClick() {
+      if (typeof window.gtag === "function") {
+        window.gtag("event", "lottery_button_click", {
+          event_category: "engagement",
+          event_label: "번호 추첨받기",
+          value: 1
+        });
+      }
+    }
+
     async function checkHealth() {
       try {
         const response = await fetch("/api/health");
@@ -602,10 +612,14 @@
     }
 
     birthInput.addEventListener("change", updateZodiac);
-    sendBtn.addEventListener("click", () => sendMessage());
+    sendBtn.addEventListener("click", () => {
+      trackLotteryButtonClick();
+      sendMessage();
+    });
     messageInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
+        trackLotteryButtonClick();
         sendMessage();
       }
     });
