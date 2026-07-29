@@ -728,12 +728,16 @@
 
       const birth = birthInput.value || "";
       const zodiac = zodiacInput.value || getZodiac(birth);
-      const latestAssistant = [...messages].reverse().find((m) => m.role === "assistant")?.content || "";
-
       generateCardBtn.disabled = true;
       cardHint.textContent = "별자리 카드를 만드는 중...";
 
       try {
+        const parsed = [...messages]
+          .reverse()
+          .find((m) => m.role === "assistant")
+          ? parseStructuredReply([...messages].reverse().find((m) => m.role === "assistant").content)
+          : { numbers: [], bonus: null };
+
         const response = await fetch("/api/zodiac-card", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -741,7 +745,7 @@
             apiKey: key,
             birthDate: birth,
             zodiac,
-            numbers: latestAssistant,
+            numbersText: parsed.numbers.length ? `${parsed.numbers.join(", ")} / 보너스 ${parsed.bonus || ""}` : "",
             prompt: "별자리 카드 이미지"
           })
         });
